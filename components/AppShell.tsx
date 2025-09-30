@@ -3,7 +3,7 @@
 import { ReactNode } from 'react';
 import { Wallet, ConnectWallet } from '@coinbase/onchainkit/wallet';
 import { Avatar, Name, Address } from '@coinbase/onchainkit/identity';
-import { Bot, Sparkles, TrendingUp, Settings2 } from 'lucide-react';
+import { Bot, Sparkles, TrendingUp, Settings2, TestTube } from 'lucide-react';
 import Link from 'next/link';
 
 interface AppShellProps {
@@ -57,6 +57,10 @@ export function AppShell({ children }: AppShellProps) {
             <Link href="/templates" className="flex flex-col items-center gap-1 text-muted hover:text-accent transition-colors duration-200">
               <TrendingUp className="w-5 h-5" />
               <span className="text-xs font-medium">Templates</span>
+            </Link>
+            <Link href="/test" className="flex flex-col items-center gap-1 text-muted hover:text-accent transition-colors duration-200">
+              <TestTube className="w-5 h-5" />
+              <span className="text-xs font-medium">Tests</span>
             </Link>
             <Link href="/settings" className="flex flex-col items-center gap-1 text-muted hover:text-accent transition-colors duration-200">
               <Settings2 className="w-5 h-5" />

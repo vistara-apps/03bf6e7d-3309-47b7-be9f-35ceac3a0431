@@ -1,25 +1,31 @@
 'use client';
 
 import { useState } from 'react';
-import { Send, Loader2, CheckCircle2, XCircle } from 'lucide-react';
+import { Send, Loader2, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react';
+import { useWalletClient, useAccount } from 'wagmi';
 import { formatCurrency } from '@/lib/utils';
+import { createX402Request } from '@/lib/payment';
 import type { AgentRequest } from '@/lib/types';
 
 interface Message {
   id: string;
-  type: 'user' | 'agent' | 'system';
+  type: 'user' | 'agent' | 'system' | 'error';
   content: string;
   timestamp: string;
   cost?: number;
   status?: AgentRequest['status'];
+  txHash?: string;
 }
 
 export function AgentChatCard() {
+  const { data: walletClient } = useWalletClient();
+  const { isConnected } = useAccount();
+  
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
       type: 'system',
-      content: 'Welcome to PayBot! Ask me anything and I\'ll handle the API payments for you.',
+      content: 'Welcome to PayBot! Ask me anything and I\'ll handle the API payments for you. Make sure to connect your wallet first.',
       timestamp: new Date().toISOString(),
     },
   ]);
@@ -31,6 +37,18 @@ export function AgentChatCard() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isProcessing) return;
+
+    // Check if wallet is connected
+    if (!isConnected) {
+      const errorMessage: Message = {
+        id: Date.now().toString(),
+        type: 'error',
+        content: 'Please connect your wallet first to make payments.',
+        timestamp: new Date().toISOString(),
+      };
+      setMessages(prev => [...prev, errorMessage]);
+      return;
+    }
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -48,30 +66,63 @@ export function AgentChatCard() {
     setShowCostPreview(false);
     setIsProcessing(true);
 
-    // Simulate agent processing
+    // Show processing message
     const processingMessage: Message = {
       id: Date.now().toString(),
       type: 'agent',
-      content: 'Processing your request and executing payment...',
+      content: 'Processing your request and executing x402 payment...',
       timestamp: new Date().toISOString(),
       status: 'processing',
     };
     setMessages(prev => [...prev, processingMessage]);
 
-    // Simulate API call delay
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    try {
+      // Execute x402 payment with real API call
+      if (!walletClient) {
+        throw new Error('Wallet client not available');
+      }
+      
+      const result = await createX402Request(
+        'https://api.openweathermap.org/data/2.5/weather', // Example API endpoint
+        estimatedCost,
+        walletClient
+      );
 
-    // Simulate successful response
-    const resultMessage: Message = {
-      id: Date.now().toString(),
-      type: 'agent',
-      content: 'NYC: 72°F, Sunny ☀️\n\nPayment confirmed! Transaction: 0x1234...5678',
-      timestamp: new Date().toISOString(),
-      cost: estimatedCost,
-      status: 'completed',
-    };
+      if (result.success) {
+        // Show successful result
+        const resultMessage: Message = {
+          id: Date.now().toString(),
+          type: 'agent',
+          content: `✅ Request completed successfully!\n\n${JSON.stringify(result.data, null, 2)}\n\n💳 Payment confirmed!`,
+          timestamp: new Date().toISOString(),
+          cost: estimatedCost,
+          status: 'completed',
+          txHash: result.txHash,
+        };
+        setMessages(prev => [...prev.slice(0, -1), resultMessage]);
+      } else {
+        // Show error message
+        const errorMessage: Message = {
+          id: Date.now().toString(),
+          type: 'error',
+          content: `❌ Payment failed: ${result.error || 'Unknown error'}`,
+          timestamp: new Date().toISOString(),
+          status: 'failed',
+        };
+        setMessages(prev => [...prev.slice(0, -1), errorMessage]);
+      }
+    } catch (error) {
+      // Handle unexpected errors
+      const errorMessage: Message = {
+        id: Date.now().toString(),
+        type: 'error',
+        content: `❌ Unexpected error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        timestamp: new Date().toISOString(),
+        status: 'failed',
+      };
+      setMessages(prev => [...prev.slice(0, -1), errorMessage]);
+    }
 
-    setMessages(prev => [...prev.slice(0, -1), resultMessage]);
     setIsProcessing(false);
   };
 
@@ -87,6 +138,8 @@ export function AgentChatCard() {
                 ? 'ml-auto max-w-[80%] bg-primary/20' 
                 : message.type === 'system'
                 ? 'bg-surface/50 border border-accent/20'
+                : message.type === 'error'
+                ? 'bg-red-900/20 border border-red-500/30'
                 : 'bg-surface/80'
             }`}
           >
@@ -96,12 +149,30 @@ export function AgentChatCard() {
                   <span className="text-bg text-sm font-bold">AI</span>
                 </div>
               )}
+              {message.type === 'error' && (
+                <div className="w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center flex-shrink-0">
+                  <AlertTriangle className="w-4 h-4 text-red-400" />
+                </div>
+              )}
               <div className="flex-1">
                 <p className="text-sm text-fg whitespace-pre-wrap">{message.content}</p>
                 {message.cost && (
                   <div className="mt-2 flex items-center gap-2 text-xs text-muted">
                     <CheckCircle2 className="w-4 h-4 text-success" />
                     <span>Cost: {formatCurrency(message.cost)}</span>
+                  </div>
+                )}
+                {message.txHash && (
+                  <div className="mt-2 flex items-center gap-2 text-xs text-muted">
+                    <span>Transaction:</span>
+                    <a 
+                      href={`https://basescan.org/tx/${message.txHash}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-accent hover:text-accent/80 truncate max-w-32"
+                    >
+                      {message.txHash.slice(0, 8)}...{message.txHash.slice(-6)}
+                    </a>
                   </div>
                 )}
                 {message.status === 'processing' && (
@@ -151,19 +222,29 @@ export function AgentChatCard() {
         </div>
       )}
 
+      {/* Wallet Status */}
+      {!isConnected && (
+        <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+          <div className="flex items-center gap-2 text-amber-400 text-sm">
+            <AlertTriangle className="w-4 h-4" />
+            <span>Connect your wallet to make payments and use PayBot</span>
+          </div>
+        </div>
+      )}
+
       {/* Input */}
       <form onSubmit={handleSubmit} className="flex gap-3">
         <input
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask anything... (e.g., 'Get weather in NYC')"
+          placeholder={isConnected ? "Ask anything... (e.g., 'Get weather in NYC')" : "Connect wallet first..."}
           className="input-field flex-1"
-          disabled={isProcessing}
+          disabled={isProcessing || !isConnected}
         />
         <button
           type="submit"
-          disabled={isProcessing || !input.trim()}
+          disabled={isProcessing || !input.trim() || !isConnected}
           className="btn-primary px-4 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isProcessing ? (
