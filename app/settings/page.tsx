@@ -1,4 +1,5 @@
 import { AppShell } from '@/components/AppShell';
+import { X402TestCard } from '@/components/X402TestCard';
 import { Bell, DollarSign, Shield, User } from 'lucide-react';
 
 export default function SettingsPage() {
@@ -113,6 +114,11 @@ export default function SettingsPage() {
               Disconnect Wallet
             </button>
           </div>
+        </div>
+
+        {/* X402 Test Section */}
+        <div className="mt-8">
+          <X402TestCard />
         </div>
 
         {/* Save Button */}

@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
-import { Send, Loader2, CheckCircle2, XCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Send, Loader2, CheckCircle2, XCircle, Wallet } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
+import { usePayment } from '@/hooks/usePayment';
 import type { AgentRequest } from '@/lib/types';
 
 interface Message {
@@ -15,6 +16,7 @@ interface Message {
 }
 
 export function AgentChatCard() {
+  const { isConnected, isLoading, makePayment, makeX402Request, checkTransactionStatus, error } = usePayment();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -27,6 +29,7 @@ export function AgentChatCard() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showCostPreview, setShowCostPreview] = useState(false);
   const [estimatedCost, setEstimatedCost] = useState(0.12);
+  const [currentTxHash, setCurrentTxHash] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,10 +48,22 @@ export function AgentChatCard() {
   };
 
   const handleConfirmPayment = async () => {
+    if (!isConnected) {
+      const errorMessage: Message = {
+        id: Date.now().toString(),
+        type: 'agent',
+        content: 'Please connect your wallet to make payments.',
+        timestamp: new Date().toISOString(),
+        status: 'failed',
+      };
+      setMessages(prev => [...prev, errorMessage]);
+      return;
+    }
+
     setShowCostPreview(false);
     setIsProcessing(true);
 
-    // Simulate agent processing
+    // Add processing message
     const processingMessage: Message = {
       id: Date.now().toString(),
       type: 'agent',
@@ -58,25 +73,96 @@ export function AgentChatCard() {
     };
     setMessages(prev => [...prev, processingMessage]);
 
-    // Simulate API call delay
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    try {
+      // Make payment using USDC on Base
+      const paymentResult = await makePayment({
+        amount: estimatedCost,
+        recipient: '0x742d35Cc6634C0532925a3b8D4c8c1f8b8A9d9b8', // Demo API provider address
+        description: `PayBot API request: ${input}`,
+      });
 
-    // Simulate successful response
-    const resultMessage: Message = {
-      id: Date.now().toString(),
-      type: 'agent',
-      content: 'NYC: 72°F, Sunny ☀️\n\nPayment confirmed! Transaction: 0x1234...5678',
-      timestamp: new Date().toISOString(),
-      cost: estimatedCost,
-      status: 'completed',
-    };
+      setCurrentTxHash(paymentResult.txHash);
 
-    setMessages(prev => [...prev.slice(0, -1), resultMessage]);
-    setIsProcessing(false);
+      // Update message with transaction hash
+      const txMessage: Message = {
+        id: Date.now().toString(),
+        type: 'agent',
+        content: `Payment submitted! Transaction: ${paymentResult.txHash.slice(0, 10)}...${paymentResult.txHash.slice(-8)}\n\nWaiting for confirmation...`,
+        timestamp: new Date().toISOString(),
+        status: 'processing',
+      };
+      setMessages(prev => [...prev.slice(0, -1), txMessage]);
+
+      // Poll for transaction confirmation
+      let attempts = 0;
+      const maxAttempts = 30; // 30 seconds
+      
+      const pollStatus = async () => {
+        if (attempts >= maxAttempts) {
+          throw new Error('Transaction confirmation timeout');
+        }
+
+        const status = await checkTransactionStatus(paymentResult.txHash);
+        
+        if (status === 'confirmed') {
+          // Simulate API call after payment confirmation
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          const resultMessage: Message = {
+            id: Date.now().toString(),
+            type: 'agent',
+            content: 'NYC: 72°F, Sunny ☀️\n\nPayment confirmed! Your request has been processed successfully.',
+            timestamp: new Date().toISOString(),
+            cost: estimatedCost,
+            status: 'completed',
+          };
+          setMessages(prev => [...prev.slice(0, -1), resultMessage]);
+          return;
+        } else if (status === 'failed') {
+          throw new Error('Transaction failed');
+        }
+
+        // Still pending, wait and try again
+        attempts++;
+        setTimeout(pollStatus, 1000);
+      };
+
+      await pollStatus();
+
+    } catch (err) {
+      console.error('Payment error:', err);
+      const errorMessage: Message = {
+        id: Date.now().toString(),
+        type: 'agent',
+        content: `Payment failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        timestamp: new Date().toISOString(),
+        status: 'failed',
+      };
+      setMessages(prev => [...prev.slice(0, -1), errorMessage]);
+    } finally {
+      setIsProcessing(false);
+      setCurrentTxHash(null);
+    }
   };
 
   return (
     <div className="glass-card rounded-lg p-6 max-w-3xl mx-auto">
+      {/* Wallet Status */}
+      {!isConnected && (
+        <div className="mb-4 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg flex items-center gap-2">
+          <Wallet className="w-4 h-4 text-yellow-500" />
+          <span className="text-sm text-yellow-500">Connect your wallet to make payments</span>
+        </div>
+      )}
+
+      {/* Error Display */}
+      {error && (
+        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center gap-2">
+          <XCircle className="w-4 h-4 text-red-500" />
+          <span className="text-sm text-red-500">{error}</span>
+        </div>
+      )}
+
       {/* Messages */}
       <div className="space-y-4 mb-6 max-h-[500px] overflow-y-auto">
         {messages.map((message) => (
@@ -163,8 +249,9 @@ export function AgentChatCard() {
         />
         <button
           type="submit"
-          disabled={isProcessing || !input.trim()}
+          disabled={isProcessing || !input.trim() || !isConnected}
           className="btn-primary px-4 disabled:opacity-50 disabled:cursor-not-allowed"
+          title={!isConnected ? "Connect wallet to send messages" : ""}
         >
           {isProcessing ? (
             <Loader2 className="w-5 h-5 animate-spin" />
